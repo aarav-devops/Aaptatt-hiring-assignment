@@ -1,0 +1,85 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
+    environment {
+        APP_NAME = "sparkjava-hello-world"
+        RELEASE = "1.0.0"
+        DOCKER_USER = "aaravdevops"
+        DOCKER_PASS = "dockerhub"
+        IMAGE_NAME = "${DOCKER_USER}/${APP_NAME}"
+        IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git 'https://github.com/aarav-devops/Aaptatt-hiring-assignment.git'
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Test Application') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+
+        stage('Generate Dockerfile') {
+            steps {
+                script {
+                    def dockerfileContent = """
+                        FROM tomcat:9-jre11
+                        RUN rm -rf /usr/local/tomcat/webapps/*
+                        COPY ./target/sparkjava-hello-world-1.0.war /usr/local/tomcat/webapps/sparkjava-hello-world-1.0.war
+                        EXPOSE 8080
+                        CMD ["catalina.sh", "run"]
+                    """
+                    writeFile file: 'Dockerfile', text: dockerfileContent
+                }
+            }
+        }
+
+        stage('Build & Push Docker Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub') {
+                        sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+
+        stage('Create Docker Container & Expose on Port 8080') {
+            steps {
+                script {
+                    // Check if Docker containers exist
+                    def dockerExist = sh(script: "docker ps -aq", returnStatus: true)
+                    if (dockerExist == 0) {
+                        echo "Stopping all Docker containers..."
+                        sh 'docker stop $(docker ps -q)'
+                        echo "Removing all Docker containers..."
+                        sh 'docker rm -f $(docker ps -aq)'
+                        sh 'sleep 10'
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh "docker run -d -p 8080:8080 ${IMAGE_NAME}:${IMAGE_TAG}"
+        }
+    }
+}
